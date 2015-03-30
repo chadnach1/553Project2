@@ -46,7 +46,7 @@ def mutate_net(net):
     return net
 
 def run():
-    net = mutate_net(Mininet(topo))
+    net = mutate_net(Mininet())
     
     net.start()
     print "Dumping host connections"
