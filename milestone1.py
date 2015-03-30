@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 from mininet.net import Mininet
-#from mininet.node import Controller
+from mininet.node import OVSSwitch, RemoteController
 from mininet.topo import Topo
 
 def mutate_net(net):
@@ -14,12 +14,14 @@ def mutate_net(net):
     BB_h1 = net.addHost('BB_h1')
     BB_h2 = net.addHost('BB_h2')       
 
-    ca = net.addController('ca')
-    cb = net.addController('cb')
+    # what ip address?
+    ca = net.addController(RemoteController('ca',ip="127.0.0.1"))
+    cb = net.addController(RemoteController('cb',ip="127.0.0.1"))
 
-    A = net.addSwitch('A')
-    AA = net.addSwitch("AA")
-    AB = net.addSwitch("AB")
+    # OVS Kernel Switches
+    A = net.addSwitch('A',OVSSwitch())
+    AA = net.addSwitch("AA",OVSSwitch())
+    AB = net.addSwitch("AB",OVSSwitch())
 
     B = net.addSwitch('B')
     BA = net.addSwitch("BA")
