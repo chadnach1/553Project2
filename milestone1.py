@@ -25,8 +25,23 @@ def mutate_net(net):
     BA = net.addSwitch("BA")
     BB = net.addSwitch("BB")
             
+    # Bottom level links
     net.addLink(AA,AA_h1)
-    net.addLink(AA,AA_h2
+    net.addLink(AA,AA_h2)
+    net.addLink(AB,AB_h1)
+    net.addLink(AB,AB_h2)
+    net.addLink(BA,BA_h1)
+    net.addLink(BA,BA_h1)
+    net.addLink(BB,BB_h1)
+    net.addLink(BB,BB_h1)
+
+    net.addLink(A,AA)
+    net.addLink(A,AB)
+    net.addLink(B,BA)
+    net.addLink(B,BB)
+
+    net.addLink(ca,A)
+    net.addLink(cb,B)
         
     return net
 
