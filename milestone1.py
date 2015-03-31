@@ -68,7 +68,7 @@ def run():
     dumpNodeConnections(net.hosts)
     print "Testing network connectivity"
     net.pingAll()
-    net.stop()
+    net.iperf()
 
         
 if __name__ == "__main__":
