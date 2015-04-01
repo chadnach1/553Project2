@@ -16,8 +16,8 @@ def start_net(net):
     BB_h2 = net.addHost('BB_h2',mac="01:00:00:00:08:00",ip="10.10.20.2") 
 
     # what ip address?
-    ca = net.addController('ca',controller=RemoteController,ip="10.0.0.4",port=6634)
-    cb = net.addController('cb',controller=RemoteController,ip="10.0.0.4",port=6635)
+    ca = net.addController('ca',controller=RemoteController,ip="127.0.0.1",port=6634)
+    cb = net.addController('cb',controller=RemoteController,ip="127.0.0.1",port=6635)
 
     # OVS Kernel Switches
     A = net.addSwitch('A',switch=OVSSwitch,mac="00:00:00:00:00:01",listenport=6634,dpid="1")
@@ -27,28 +27,30 @@ def start_net(net):
     B = net.addSwitch('B',switch=OVSSwitch,mac="00:00:00:00:00:04",listenport=6635,dpid="4")
     BA = net.addSwitch("BA",switch=OVSSwitch,mac="00:00:00:00:00:05",listenport=6635,dpid="5")
     BB = net.addSwitch("BB",switch=OVSSwitch,mac="00:00:00:00:00:06",listenport=6635,dpid="6")
-
+    """
     lobot = dict(bw=2,delay="2ms",max_queue_size=5)
     lomid = dict(bw=5,delay="1ms",max_queue_size=10)
     lotop = dict(bw=10,delay="0",max_queue_size=20)
-
+    """
+    lobot = {}
+    lomid = {}
+    lotop = {}
     # Bottom level links
     net.addLink(AA,AA_h1, **lobot)
     net.addLink(AA,AA_h2, **lobot)
     net.addLink(AB,AB_h1, **lobot)
     net.addLink(AB,AB_h2, **lobot)
     net.addLink(BA,BA_h1, **lobot)
-    net.addLink(BA,BA_h1, **lobot)
+    net.addLink(BA,BA_h2, **lobot)
     net.addLink(BB,BB_h1, **lobot)
-    net.addLink(BB,BB_h1, **lobot)
+    net.addLink(BB,BB_h2, **lobot)
 
     net.addLink(A,AA, **lomid)
     net.addLink(A,AB, **lomid)
     net.addLink(B,BA, **lomid)
     net.addLink(B,BB, **lomid)
 
-    net.addLink(ca,A, **lotop)
-    net.addLink(cb,B, **lotop)
+    net.addLink(A,B, **lotop)
 
     net.build()
 
