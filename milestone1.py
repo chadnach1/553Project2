@@ -69,6 +69,7 @@ def run():
     print "Testing network connectivity"
     net.pingAll()
     net.iperf()
+    net.stop()
 
         
 if __name__ == "__main__":
