@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+from mininet.link import TCLink
 from mininet.net import Mininet
 from mininet.node import OVSSwitch, RemoteController
 from mininet.topo import Topo
@@ -27,14 +28,11 @@ def start_net(net):
     B = net.addSwitch('B',switch=OVSSwitch,mac="00:00:00:00:00:04",listenport=6635,dpid="4")
     BA = net.addSwitch("BA",switch=OVSSwitch,mac="00:00:00:00:00:05",listenport=6635,dpid="5")
     BB = net.addSwitch("BB",switch=OVSSwitch,mac="00:00:00:00:00:06",listenport=6635,dpid="6")
-    """
-    lobot = dict(bw=2,delay="2ms",max_queue_size=5)
-    lomid = dict(bw=5,delay="1ms",max_queue_size=10)
-    lotop = dict(bw=10,delay="0",max_queue_size=20)
-    """
-    lobot = {}
-    lomid = {}
-    lotop = {}
+
+    lobot = dict(cls=TCLink,bw=2,delay="2ms",max_queue_size=5)
+    lomid = dict(cls=TCLink,bw=5,delay="1ms",max_queue_size=10)
+    lotop = dict(cls=TCLink,bw=10,delay="0",max_queue_size=20)
+
     # Bottom level links
     net.addLink(AA,AA_h1, **lobot)
     net.addLink(AA,AA_h2, **lobot)
