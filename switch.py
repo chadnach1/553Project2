@@ -225,5 +225,7 @@ class DosDetectorSwitch(app_manager.RyuApp):
             self.stat_monitor.update_port(dpid, port, rx_bytes, tx_bytes)
     
     def _pushback_monitor(self):
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.connect("localhost", PUSHBACK_SOCKET) # hm this won't work, need diff port
         while True:
             hub.sleep(self.tdelta)
