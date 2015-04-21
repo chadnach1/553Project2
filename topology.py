@@ -73,7 +73,8 @@ def run():
     print "Dumping host connections"
     dumpNodeConnections(net.hosts)
     print "Testing network connectivity"
-    net.pingAll()
+    #net.pingAll()
+    #net.iperf()
     CLI(net)
     net.stop()
         
