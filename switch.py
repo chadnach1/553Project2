@@ -40,7 +40,8 @@ class StatMonitor(object):
             history.append(bytez)
             #if len(history) > self.maxlen: history[:] = history[-self.maxlen:]
             if len(history) > self.maxlen: del history[0]
-            delta = sum(map(lambda (x,y): float(x-y)/tdelta, zip(history[1:],history[:-1])))
+            delta = sum(map(lambda (x,y): float(x-y)/self.tdelta, 
+                            zip(history[1:],history[:-1])))
         return delta/float(self.maxlen) > self.delta
 
 class DosDetectorSwitch(app_manager.RyuApp):
@@ -51,7 +52,10 @@ class DosDetectorSwitch(app_manager.RyuApp):
         self.mac_to_port = {}
         self.datapaths = {}
         self.monitor_thread = hub.spawn(self._monitor)
-        self.interval = 1 #seconds
+        self.tdelta = 1 #seconds
+        self.delta = 1000 #bytes
+        self.maxlen = 5 #history window
+        self.stat_monitor = StatMonitor(self.tdelta, self.delta, self.maxlen) #threadsafe
 
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     def switch_features_handler(self, ev):
@@ -104,9 +108,7 @@ class DosDetectorSwitch(app_manager.RyuApp):
 
         dst = eth.dst
         src = eth.src
-        print "LULS"
-        print dst
-        print src
+
         dpid = datapath.id
         self.mac_to_port.setdefault(dpid, {})
 
@@ -157,7 +159,7 @@ class DosDetectorSwitch(app_manager.RyuApp):
         while True:
             for dp in self.datapaths.values():
                 self._request_stats(dp)
-            hub.sleep(self.interval)
+            hub.sleep(self.tdelta)
 
     def _request_stats(self, datapath):
         self.logger.debug('send stats request: %016x', datapath.id)
@@ -173,26 +175,37 @@ class DosDetectorSwitch(app_manager.RyuApp):
     @set_ev_cls(ofp_event.EventOFPFlowStatsReply, MAIN_DISPATCHER)
     def _flow_stats_reply_handler(self, ev):
         body = ev.msg.body
-        
+        """
         self.logger.info('datapath         '
                          'in-port  eth-dst           '
                          'out-port packets  bytes')
         self.logger.info('---------------- '
                          '-------- ----------------- '
                          '-------- -------- --------')
+        """
         for stat in sorted([flow for flow in body if flow.priority == 1],
                            key=lambda flow: (flow.match['in_port'],
                                              flow.match['eth_dst'])):
-            self.logger.info('%016x %8x %17s %8x %8d %8d',
-                             ev.msg.datapath.id,
-                             stat.match['in_port'], stat.match['eth_dst'],
-                             stat.instructions[0].actions[0].port,
-                             stat.packet_count, stat.byte_count)
+            #self.logger.info('%016x %8x %17s %8x %8d %8d',
+            #                 ev.msg.datapath.id,
+            #                 stat.match['in_port'], stat.match['eth_dst'],
+            #                 stat.instructions[0].actions[0].port,
+            #                 stat.packet_count, stat.byte_count)
+            dpid = ev.msg.datapath.id
+            in_port = stat.match["in_port"]
+            out_port = stat.instructions[0].actions[0].port
+            eth_dst = stat.match["eth_dst"]
+            packets = stat.packet_count
+            bytez = stat.byte_count
 
+            if self.stat_monitor.insert(dpid, in_port, out_port, eth_dst, packets, bytez):
+                print "DDOSSSSSS"
+                print "FUCK"
+            
     @set_ev_cls(ofp_event.EventOFPPortStatsReply, MAIN_DISPATCHER)
     def _port_stats_reply_handler(self, ev):
         body = ev.msg.body
-
+        """
         self.logger.info('datapath         port     '
                          'rx-pkts  rx-bytes rx-error '
                          'tx-pkts  tx-bytes tx-error')
@@ -204,4 +217,4 @@ class DosDetectorSwitch(app_manager.RyuApp):
                              ev.msg.datapath.id, stat.port_no,
                              stat.rx_packets, stat.rx_bytes, stat.rx_errors,
                              stat.tx_packets, stat.tx_bytes, stat.tx_errors)
-
+        """
