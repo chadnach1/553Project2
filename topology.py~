@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+from mininet.cli import CLI
 from mininet.link import TCLink
 from mininet.net import Mininet
 from mininet.node import OVSSwitch, RemoteController
@@ -21,17 +22,22 @@ def start_net(net):
     cb = net.addController('cb',controller=RemoteController,ip="127.0.0.1",port=6635)
 
     # OVS Kernel Switches
-    A = net.addSwitch('A',switch=OVSSwitch,mac="00:00:00:00:00:01",listenport=6634,dpid="1")
-    AA = net.addSwitch("AA",switch=OVSSwitch,mac="00:00:00:00:00:02",listenport=6634,dpid="2")
-    AB = net.addSwitch("AB",switch=OVSSwitch,mac="00:00:00:00:00:03",listenport=6634,dpid="3")
+    A = net.addSwitch('A',switch=OVSSwitch,mac="00:00:00:00:00:01",listenport=6634,dpid="1",protocols='OpenFlow13')
+    AA = net.addSwitch("AA",switch=OVSSwitch,mac="00:00:00:00:00:02",listenport=6634,dpid="2",protocols='OpenFlow13')
+    AB = net.addSwitch("AB",switch=OVSSwitch,mac="00:00:00:00:00:03",listenport=6634,dpid="3",protocols='OpenFlow13')
 
-    B = net.addSwitch('B',switch=OVSSwitch,mac="00:00:00:00:00:04",listenport=6635,dpid="4")
-    BA = net.addSwitch("BA",switch=OVSSwitch,mac="00:00:00:00:00:05",listenport=6635,dpid="5")
-    BB = net.addSwitch("BB",switch=OVSSwitch,mac="00:00:00:00:00:06",listenport=6635,dpid="6")
+    B = net.addSwitch('B',switch=OVSSwitch,mac="00:00:00:00:00:04",listenport=6635,dpid="4",protocols='OpenFlow13')
+    BA = net.addSwitch("BA",switch=OVSSwitch,mac="00:00:00:00:00:05",listenport=6635,dpid="5",protocols='OpenFlow13')
+    BB = net.addSwitch("BB",switch=OVSSwitch,mac="00:00:00:00:00:06",listenport=6635,dpid="6",protocols='OpenFlow13')
 
+    """
     lobot = dict(cls=TCLink,bw=2,delay="2ms",max_queue_size=5)
     lomid = dict(cls=TCLink,bw=5,delay="1ms",max_queue_size=10)
     lotop = dict(cls=TCLink,bw=10,delay="0",max_queue_size=20)
+    """
+    lobot = dict()
+    lomid = dict()
+    lotop = dict()
 
     # Bottom level links
     net.addLink(AA,AA_h1, **lobot)
@@ -62,15 +68,15 @@ def start_net(net):
     return net
 
 def run():
-    net = start_net(Mininet())
+    net = start_net(Mininet(controller=None,autoSetMacs=True))
     net.start()
     print "Dumping host connections"
     dumpNodeConnections(net.hosts)
     print "Testing network connectivity"
     net.pingAll()
     net.iperf()
+    CLI(net)
     net.stop()
-
         
 if __name__ == "__main__":
     run()
