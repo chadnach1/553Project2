@@ -24,6 +24,7 @@ from ryu.lib import hub
 from ryu.lib.packet import packet
 from ryu.lib.packet import ethernet
 import subprocess
+import threading
 
 class StatMonitor(object):
     def __init__(self, tdelta=1.0, delta=1000, maxlen=5, server=None):
@@ -31,13 +32,15 @@ class StatMonitor(object):
         self.tdelta = tdelta
         self.delta = delta
         self.maxlen = maxlen
+        self.lock = threading.RLock()
 
     def insert(self, dpid, in_port, out_port, eth_dst, packets, bytez):
-        history = self.records[dpid,in_port,out_port,eth_dst]
-        history.append(bytez)
-        #if len(history) > self.maxlen: history[:] = history[-self.maxlen:]
-        if len(history) > self.maxlen: del history[0]
-        delta = sum(map(lambda (x,y): float(x-y)/tdelta, zip(history[1:],history[:-1])))
+        with self.lock:
+            history = self.records[dpid,in_port,out_port,eth_dst]
+            history.append(bytez)
+            #if len(history) > self.maxlen: history[:] = history[-self.maxlen:]
+            if len(history) > self.maxlen: del history[0]
+            delta = sum(map(lambda (x,y): float(x-y)/tdelta, zip(history[1:],history[:-1])))
         return delta/float(self.maxlen) > self.delta
 
 class DosDetectorSwitch(app_manager.RyuApp):
