@@ -23,26 +23,41 @@ from ryu.ofproto import ofproto_v1_3
 from ryu.lib import hub
 from ryu.lib.packet import packet
 from ryu.lib.packet import ethernet
+import socket
 import subprocess
 import threading
 
+HOST_SERVER = "00:00:00:00:01:00"
+PUSHBACK_SOCKET = 4050
+
 class StatMonitor(object):
-    def __init__(self, tdelta=1.0, delta=1000, maxlen=5, server=None):
+    def __init__(self, tdelta=1.0, delta=1000, maxlen=5, server=HOST_SERVER):
         self.records = defaultdict(list)
         self.tdelta = tdelta
         self.delta = delta
         self.maxlen = maxlen
+        self.server = server
         self.lock = threading.RLock()
+        self.attackers = []
 
-    def insert(self, dpid, in_port, out_port, eth_dst, packets, bytez):
+    def update_flow(self, dpid, in_port, out_port, eth_dst, packets, bytez):
         with self.lock:
             history = self.records[dpid,in_port,out_port,eth_dst]
             history.append(bytez)
+            # this is too slow, but leaving it here to show how to mutate lists
             #if len(history) > self.maxlen: history[:] = history[-self.maxlen:]
             if len(history) > self.maxlen: del history[0]
             delta = sum(map(lambda (x,y): float(x-y)/self.tdelta, 
                             zip(history[1:],history[:-1])))
-        return delta/float(self.maxlen) > self.delta
+            dos_bool = delta/float(self.maxlen) > self.delta
+            if dos_bool and eth_dst != self.server:
+                print dpid, in_port, eth_dst
+                self.attackers.append((dpid,out_port,eth_dst)) #?
+        return dos_bool and eth_dst == self.server
+        # PortDescStats?
+    def update_port(self, dpid, port, rx_bytes, tx_bytes):
+        with self.lock:
+            pass
 
 class DosDetectorSwitch(app_manager.RyuApp):
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
@@ -56,6 +71,7 @@ class DosDetectorSwitch(app_manager.RyuApp):
         self.delta = 1000 #bytes
         self.maxlen = 5 #history window
         self.stat_monitor = StatMonitor(self.tdelta, self.delta, self.maxlen) #threadsafe
+        self.pushback_thread = hub.spawn(self._pushback_monitor)
 
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     def switch_features_handler(self, ev):
@@ -175,46 +191,39 @@ class DosDetectorSwitch(app_manager.RyuApp):
     @set_ev_cls(ofp_event.EventOFPFlowStatsReply, MAIN_DISPATCHER)
     def _flow_stats_reply_handler(self, ev):
         body = ev.msg.body
-        """
-        self.logger.info('datapath         '
-                         'in-port  eth-dst           '
-                         'out-port packets  bytes')
-        self.logger.info('---------------- '
-                         '-------- ----------------- '
-                         '-------- -------- --------')
-        """
+        datapath = ev.msg.datapath
         for stat in sorted([flow for flow in body if flow.priority == 1],
                            key=lambda flow: (flow.match['in_port'],
                                              flow.match['eth_dst'])):
-            #self.logger.info('%016x %8x %17s %8x %8d %8d',
-            #                 ev.msg.datapath.id,
-            #                 stat.match['in_port'], stat.match['eth_dst'],
-            #                 stat.instructions[0].actions[0].port,
-            #                 stat.packet_count, stat.byte_count)
-            dpid = ev.msg.datapath.id
+            dpid = datapath.id
             in_port = stat.match["in_port"]
             out_port = stat.instructions[0].actions[0].port
             eth_dst = stat.match["eth_dst"]
             packets = stat.packet_count
             bytez = stat.byte_count
-
-            if self.stat_monitor.insert(dpid, in_port, out_port, eth_dst, packets, bytez):
-                print "DDOSSSSSS"
-                print "FUCK"
+            # why do we need port stats? answer: we don't
+            # flow stats don't include ARP packets, but that doesn't make a big difference
+            if self.stat_monitor.update_flow(dpid, in_port, out_port, eth_dst, packets, bytez):
+                self.victims.append(eth_dst)
+                match = datapath.ofproto_parser.OFPMatch(dl_dst=eth_dst,
+                                                         in_port=in_port,
+                                                         out_port=out_port)
+                mod = datapath.ofproto_parser.OFPFlowMod(
+                    datapath=datapath, match=match,
+                    command=datapath.ofproto.OFPFC_ADD, idle_timeout=10, hard_timeout=0,
+                    priority=0x8000, flags=datapath.ofproto.OFPFF_SEND_FLOW_REM)
+                datapath.send_msg(mod)
             
     @set_ev_cls(ofp_event.EventOFPPortStatsReply, MAIN_DISPATCHER)
     def _port_stats_reply_handler(self, ev):
         body = ev.msg.body
-        """
-        self.logger.info('datapath         port     '
-                         'rx-pkts  rx-bytes rx-error '
-                         'tx-pkts  tx-bytes tx-error')
-        self.logger.info('---------------- -------- '
-                         '-------- -------- -------- '
-                         '-------- -------- --------')
+        dpid = ev.msg.datapath.id
         for stat in sorted(body, key=attrgetter('port_no')):
-            self.logger.info('%016x %8x %8d %8d %8d %8d %8d %8d', 
-                             ev.msg.datapath.id, stat.port_no,
-                             stat.rx_packets, stat.rx_bytes, stat.rx_errors,
-                             stat.tx_packets, stat.tx_bytes, stat.tx_errors)
-        """
+            port = stat.port_no
+            rx_bytes = stat.rx_bytes #stat.rx_packets
+            tx_bytes = stat.tx_bytes #stat.tx_packets
+            self.stat_monitor.update_port(dpid, port, rx_bytes, tx_bytes)
+    
+    def _pushback_monitor(self):
+        while True:
+            hub.sleep(self.tdelta)
