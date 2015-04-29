@@ -68,7 +68,7 @@ class DosDetectorSwitch(app_manager.RyuApp):
         self.mac_to_port = {}
         self.datapaths = {}
         self.monitor_thread = hub.spawn(self._monitor)
-        self.tdelta = 1 #seconds
+        self.tdelta = 3 #seconds
         self.delta = 1000 #bytes
         self.maxlen = 5 #history window
         self.stat_monitor = StatMonitor(self.tdelta, self.delta, self.maxlen) #threadsafe
