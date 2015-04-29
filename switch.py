@@ -39,6 +39,7 @@ class StatMonitor(object):
         self.server = server
         self.lock = threading.RLock()
         self.attackers = []
+        self.victims = []
 
     def update_flow(self, dpid, in_port, out_port, eth_dst, packets, bytez):
         with self.lock:
@@ -204,10 +205,10 @@ class DosDetectorSwitch(app_manager.RyuApp):
             # why do we need port stats? answer: we don't
             # flow stats don't include ARP packets, but that doesn't make a big difference
             if self.stat_monitor.update_flow(dpid, in_port, out_port, eth_dst, packets, bytez):
-                self.victims.append(eth_dst)
-                match = datapath.ofproto_parser.OFPMatch(dl_dst=eth_dst,
-                                                         in_port=in_port,
-                                                         out_port=out_port)
+                self.stat_monitor.victims.append(eth_dst)
+                match = datapath.ofproto_parser.OFPMatch(eth_dst=eth_dst,
+                                                         in_port=in_port)
+                                                         #out_port=out_port)
                 mod = datapath.ofproto_parser.OFPFlowMod(
                     datapath=datapath, match=match,
                     command=datapath.ofproto.OFPFC_ADD, idle_timeout=10, hard_timeout=0,
