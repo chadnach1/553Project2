@@ -71,7 +71,7 @@ class DosDetectorSwitch(app_manager.RyuApp):
         self.mac_to_port = {}
         self.datapaths = {}
         self.monitor_thread = hub.spawn(self._monitor)
-        self.tdelta = 3 #seconds
+        self.tdelta = 1 #seconds
         self.delta = 1000 #bytes
         self.maxlen = 5 #history window
         self.stat_monitor = StatMonitor(self.tdelta, self.delta, self.maxlen) #threadsafe
@@ -207,7 +207,7 @@ class DosDetectorSwitch(app_manager.RyuApp):
             bytez = stat.byte_count
             # why do we need port stats? answer: we don't
             # flow stats don't include ARP packets, but that doesn't make a big difference
-            if self.stat_monitor.update_flow(dpid, in_port, out_port, eth_dst, packets, bytez):
+            if self.stat_monitor.update_flow(dpid, in_port, out_port, eth_dst, packets, bytez) and False: #turned off for the attacker's server
                 self.stat_monitor.victims.append(eth_dst)
                 match = datapath.ofproto_parser.OFPMatch(eth_dst=eth_dst,
                                                          in_port=in_port)
