@@ -28,20 +28,27 @@ import subprocess
 import threading
 
 HOST_SERVER = "00:00:00:00:01:00"
+SOCKET_SOURCE = 4040
 PUSHBACK_SOCKET = 4050
+REMOTE = False
 
 class StatMonitor(object):
     """ Datastructure for detecting DoS attacks and identifying attackers
     """
-    def __init__(self, tdelta=1.0, delta=1000, maxlen=5, server=HOST_SERVER):
+    def __init__(self, tdelta=1.0, delta=1000, maxlen=5, server=HOST_SERVER, count=10):
         self.records = defaultdict(list)
-        self.tdelta = tdelta
-        self.delta = delta
-        self.maxlen = maxlen
-        self.server = server
-        self.lock = threading.RLock()
-        self.attackers = []
-        self.victims = []
+        self.portnames = {}
+        self.tdelta = tdelta                # time delta between polls
+        self.delta = delta                  # max bandwidth
+        self.maxlen = maxlen                # window size
+        self.server = server                # protected server
+        self.count = count                  # ticks before removing QoS and adding drop flow
+        self.lock = threading.Lock()        # lock
+        self.attackers = []                 # list of (attacker, count)
+        self.attackerset = set()            # set of local attackers blocked
+        self.remote_attackers = []          # set of remote attackers
+        self.mac_map = defaultdict(set)     # map from (dpid, in_port, out_port) to eth_dst
+        self.inv_mac_map = defaultdict(set) # inverse mapping of the above
 
     def update_flow(self, dpid, in_port, out_port, eth_dst, packets, bytez):
         with self.lock:
@@ -50,18 +57,68 @@ class StatMonitor(object):
             # this is too slow, but leaving it here to show how to mutate lists
             #if len(history) > self.maxlen: history[:] = history[-self.maxlen:]
             if len(history) > self.maxlen: del history[0]
+            
+            self.mac_map[dpid,in_port,out_port].add(eth_dst)
+            self.inv_mac_map[eth_dst].add((dpid,in_port,out_port))
+            # our bandwidth algorithm
             delta = sum(map(lambda (x,y): float(x-y)/self.tdelta, 
                             zip(history[1:],history[:-1])))
             dos_bool = delta/float(self.maxlen) > self.delta
             if dos_bool and eth_dst != self.server:
-                print dpid, in_port, eth_dst
-                self.attackers.append((dpid,out_port,eth_dst)) #?
-        return dos_bool and eth_dst == self.server
-        # Use PortDescStats to get actual names?
-        # currently just add a drop flow
+                attacker = int(eth_dst[-5:-3])
+                if (attacker > 4 and not REMOTE) or (attacker < 5 and REMOTE):
+                    print "REMOTE ATTACK DETECTED"
+                    # not using datapath.send_msg here because I'm in the stat_monitor
+                    command = "sudo ovs-ofctl -O openflow13 add-flow A in_port=3,eth_dst=" + HOST_SERVER + "eth_src=" + eth_dst + ",actions=drop"
+                    subprocess.call(command, shell=True)
+                    self.remote_attackers.append(eth_dst)
+                    hub.sleep(1)
+                else:
+                    pass
+        return dos_bool and eth_dst != self.server and int(eth_dst[-5:-3]) < 5
+
+    # I used FlowStats for everything, I hope that's ok.
+    # Flows are added immediately after ARPs, so for the purpose of
+    # DoS detection, they should be the same, given our assumptions.
     def update_port(self, dpid, port, rx_bytes, tx_bytes):
         with self.lock:
             pass
+
+    def found_attacker(self, mac):
+        """ Once the other pushback server finds an attacker
+            and sends it here, we add it
+        """
+        with self.lock:
+            if mac not in self.attackerset:
+                self.attackers.append((mac,0))
+                self.attackerset.add(mac)
+                dpid,inp,outp = sorted(self.inv_mac_map[mac], key=lambda x: x[0], reverse=True)[0]
+                port = self.portnames[dpid,inp] # egress qos shaping
+                command = "sudo ovs-vsctl -- set port " + port + " qos=@newqos \
+-- --id=@newqos create qos type=linux-htb \
+other-config:max-rate=1000000000 \
+queues:1=@q1 \
+-- --id=@q1 create Queue other-config:max-rate=50000"
+                subprocess.call(command, shell=True)
+
+                dpid,inp,outp = sorted(self.inv_mac_map[mac], key=lambda x: x[0], reverse=True)[0]
+                port = self.portnames[dpid,inp] # egress qos shaping
+                command = "sudo ovs-ofctl -O openflow13 add-flow " + port[:2] + " in_port=" + str(outp) + ",eth_src=" + mac + ",eth_dst=" + HOST_SERVER + ",actions=set_queue:1"
+                subprocess.call(command, shell=True)
+
+    def increment_times(self):
+        with self.lock:
+            attackers = map(lambda (mac,count): (mac,count+1), self.attackers)
+            for (mac,_) in filter(lambda (_, count): count >= self.count, attackers):
+                # remove qos policing and install drop flow
+                dpid,inp,outp = sorted(self.inv_mac_map[mac], key=lambda x: x[0], reverse=True)[0]
+                port = self.portnames[dpid,inp]
+                command = "sudo ovs-ofctl -O openflow13 del-flows " + port[:2] + " eth_dst=" + HOST_SERVER + ",in_port=" + str(outp)
+                subprocess.call(command, shell=True)
+                command = "sudo ovs-ofctl -O openflow13 add-flow " + port[:2] + " in_port=" + str(outp) + ",eth_dst=" + HOST_SERVER + ",eth_src=" + mac + ",actions=drop"
+                subprocess.call(command, shell=True)
+                
+            self.attackers = filter(lambda (_, count): count < self.count, attackers)
 
 class DosDetectorSwitch(app_manager.RyuApp):
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
@@ -71,11 +128,16 @@ class DosDetectorSwitch(app_manager.RyuApp):
         self.mac_to_port = {}
         self.datapaths = {}
         self.monitor_thread = hub.spawn(self._monitor)
-        self.tdelta = 3 #seconds
-        self.delta = 1000 #bytes
+        self.tdelta = 1 #seconds
+        self.delta = 5000 #bytes
         self.maxlen = 5 #history window
-        self.stat_monitor = StatMonitor(self.tdelta, self.delta, self.maxlen) #threadsafe
+        self.count = 10
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.sock.bind(("localhost", SOCKET_SOURCE))
+        self.stat_monitor = StatMonitor(self.tdelta, self.delta, self.maxlen, HOST_SERVER, self.count)
         self.pushback_thread = hub.spawn(self._pushback_monitor)
+        self.increment_thread = hub.spawn(self._stat_monitor)
 
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     def switch_features_handler(self, ev):
@@ -132,7 +194,7 @@ class DosDetectorSwitch(app_manager.RyuApp):
         dpid = datapath.id
         self.mac_to_port.setdefault(dpid, {})
 
-        self.logger.info("packet in %s %s %s %s", dpid, src, dst, in_port)
+        #self.logger.info("packet in %s %s %s %s", dpid, src, dst, in_port)
 
         # learn a mac address to avoid FLOOD next time.
         self.mac_to_port[dpid][src] = in_port
@@ -192,6 +254,16 @@ class DosDetectorSwitch(app_manager.RyuApp):
         req = parser.OFPPortStatsRequest(datapath, 0, ofproto.OFPP_ANY)
         datapath.send_msg(req)
 
+        req = parser.OFPPortDescStatsRequest(datapath, 0)
+        datapath.send_msg(req)
+
+    @set_ev_cls(ofp_event.EventOFPPortDescStatsReply, MAIN_DISPATCHER)
+    def _port_desc_reply_handler(self, ev):
+        body = ev.msg.body
+        datapath = ev.msg.datapath
+        for p in body:
+            self.stat_monitor.portnames[datapath.id, p.port_no] = p.name
+
     @set_ev_cls(ofp_event.EventOFPFlowStatsReply, MAIN_DISPATCHER)
     def _flow_stats_reply_handler(self, ev):
         body = ev.msg.body
@@ -207,16 +279,19 @@ class DosDetectorSwitch(app_manager.RyuApp):
             bytez = stat.byte_count
             # why do we need port stats? answer: we don't
             # flow stats don't include ARP packets, but that doesn't make a big difference
-            if self.stat_monitor.update_flow(dpid, in_port, out_port, eth_dst, packets, bytez):
-                self.stat_monitor.victims.append(eth_dst)
-                match = datapath.ofproto_parser.OFPMatch(eth_dst=eth_dst,
-                                                         in_port=in_port)
-                                                         #out_port=out_port)
+            if self.stat_monitor.update_flow(
+                    dpid, in_port, out_port, eth_dst, packets, bytez) and not REMOTE:
+                print "LOCAL ATTACK DETECTED"
+                print "Attacker: " + eth_dst
+                match = datapath.ofproto_parser.OFPMatch(eth_src=eth_dst,
+                                                         in_port=out_port)
                 mod = datapath.ofproto_parser.OFPFlowMod(
                     datapath=datapath, match=match,
                     command=datapath.ofproto.OFPFC_ADD, idle_timeout=10, hard_timeout=0,
                     priority=0x8000, flags=datapath.ofproto.OFPFF_SEND_FLOW_REM)
                 datapath.send_msg(mod)
+            elif eth_dst in map(lambda (mac,_): mac, self.stat_monitor.attackers):
+                pass
             
     @set_ev_cls(ofp_event.EventOFPPortStatsReply, MAIN_DISPATCHER)
     def _port_stats_reply_handler(self, ev):
@@ -232,7 +307,26 @@ class DosDetectorSwitch(app_manager.RyuApp):
         """ Establishes a TCP connection then continuously communicates status 
             with partner server
         """ 
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        #self.sock.connect("localhost", PUSHBACK_SOCKET) # hm this won't work, need diff port
+        if not REMOTE:
+            self.sock.listen(1)
+            connection,_ = self.sock.accept()
+        else:
+            self.sock.connect(("localhost", PUSHBACK_SOCKET))
         while True:
+            if not REMOTE:
+                for attacker in self.stat_monitor.remote_attackers:
+                    print "sending " + attacker
+                    connection.send(attacker)
+                    self.stat_monitor.remote_attackers = []
+            else:
+                mac = self.sock.recv(256)
+                print "attacker: " + mac
+                self.stat_monitor.found_attacker(mac)
+            hub.sleep(self.tdelta)
+
+    def _stat_monitor(self):
+        """ Cleans up remote attacker buffer
+        """
+        while True:
+            self.stat_monitor.increment_times()
             hub.sleep(self.tdelta)
