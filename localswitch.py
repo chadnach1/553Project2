@@ -315,7 +315,7 @@ class DosDetectorSwitch(app_manager.RyuApp):
         while True:
             if not REMOTE:
                 for attacker in self.stat_monitor.remote_attackers:
-                    print "sending " + attacker
+                    print "pushback sending " + attacker
                     connection.send(attacker)
                     self.stat_monitor.remote_attackers = []
             else:
