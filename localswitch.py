@@ -69,7 +69,7 @@ class StatMonitor(object):
                 if (attacker > 4 and not REMOTE) or (attacker < 5 and REMOTE):
                     print "REMOTE ATTACK DETECTED"
                     # not using datapath.send_msg here because I'm in the stat_monitor
-                    command = "sudo ovs-ofctl -O openflow13 add-flow A in_port=3,eth_dst=" + HOST_SERVER + "eth_src=" + eth_dst + ",actions=drop"
+                    command = "sudo ovs-ofctl -O openflow13 add-flow A in_port=3,eth_dst=" + HOST_SERVER + ",eth_src=" + eth_dst + ",actions=drop"
                     subprocess.call(command, shell=True)
                     self.remote_attackers.append(eth_dst)
                     hub.sleep(1)
